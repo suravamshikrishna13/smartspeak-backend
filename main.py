@@ -1,4 +1,11 @@
+
 from fastapi import FastAPI
+
+app = FastAPI()
+
+@app.get("/")
+def root():
+    return {"status": "SmartSpeak backend running"}
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
