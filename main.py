@@ -31,6 +31,25 @@ def get_dashboard():
         "fluency_score": 7.5,
         "grammar_score": 6.8
     }
+@app.get("/reports")
+def get_reports():
+    return {
+        "reports": [
+            {
+                "date": "2026-01-18",
+                "topic": "Business Meeting",
+                "fluency": 85,
+                "grammar": 88
+            },
+            {
+                "date": "2026-01-16",
+                "topic": "Interview Practice",
+                "fluency": 78,
+                "grammar": 82
+            }
+        ]
+    }
+
 
 @app.post("/schedule-call")
 def schedule_call(data: ScheduleCall):
