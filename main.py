@@ -1,36 +1,48 @@
-
 from fastapi import FastAPI
-
-app = FastAPI()
-
-@app.get("/")
-def root():
-    return {"status": "SmartSpeak backend running"}
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 app = FastAPI()
 
-# Allow frontend access
+# -----------------------------
+# CORS (VERY IMPORTANT)
+# -----------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=["*"],  # later restrict
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
+# -----------------------------
+# Models
+# -----------------------------
 class ScheduleCall(BaseModel):
-    phone: str
     topic: str
-    datetime: str
+    time: str
 
+# -----------------------------
+# Root
+# -----------------------------
+@app.get("/")
+def root():
+    return {"message": "SmartSpeak Backend Running"}
+
+# -----------------------------
+# DASHBOARD (OBVIOUS TEST VALUES)
+# -----------------------------
 @app.get("/dashboard")
 def get_dashboard():
     return {
-        "upcoming_call": "Today, 6:00 PM",
-        "fluency_score": 7.5,
-        "grammar_score": 6.8
+        "upcoming_call": "Tomorrow 10 AM",
+        "fluency_score": 3.3,
+        "grammar_score": 2.1
     }
+
+# -----------------------------
+# REPORTS
+# -----------------------------
 @app.get("/reports")
 def get_reports():
     return {
@@ -50,10 +62,14 @@ def get_reports():
         ]
     }
 
-
+# -----------------------------
+# SCHEDULE CALL
+# -----------------------------
 @app.post("/schedule-call")
 def schedule_call(data: ScheduleCall):
     return {
         "status": "success",
-        "message": "AI call scheduled successfully"
+        "message": "Call scheduled successfully",
+        "data": data
     }
+
