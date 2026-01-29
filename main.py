@@ -1,81 +1,93 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import create_engine, text
 from pydantic import BaseModel
+import os
+from dotenv import load_dotenv
+
+load_dotenv()
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+
+engine = create_engine(DATABASE_URL)
 
 app = FastAPI()
 
-# -----------------------------
-# CORS (VERY IMPORTANT)
-# -----------------------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # later restrict
-    allow_credentials=True,
+    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# -----------------------------
-# Models
-# -----------------------------
 class ScheduleCall(BaseModel):
     topic: str
     time: str
 
-# -----------------------------
-# Root
-# -----------------------------
 @app.get("/")
 def root():
     return {"message": "SmartSpeak Backend Running"}
 
-# -----------------------------
-# DASHBOARD (OBVIOUS TEST VALUES)
-# -----------------------------
+# ---------------- DASHBOARD ----------------
+
 @app.get("/dashboard")
 def get_dashboard():
+    with engine.connect() as conn:
+        row = conn.execute(text("""
+            SELECT topic, scheduled_time, fluency_score, grammar_score
+            FROM calls
+            ORDER BY created_at DESC
+            LIMIT 1
+        """)).fetchone()
+
+    if not row:
+        return {
+            "upcoming_call": "No calls",
+            "fluency_score": 0,
+            "grammar_score": 0
+        }
+
     return {
-        "upcoming_call": "Tomorrow 10 AM",
-        "fluency_score": 3.3,
-        "grammar_score": 2.1
+        "upcoming_call": str(row.scheduled_time),
+        "fluency_score": row.fluency_score or 0,
+        "grammar_score": row.grammar_score or 0
     }
+
+# ---------------- REPORTS ----------------
 
 @app.get("/reports")
 def get_reports():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT topic, fluency, grammar, created_at
-        FROM reports
-        ORDER BY created_at DESC
-    """)
-
-    rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
+    with engine.connect() as conn:
+        rows = conn.execute(text("""
+            SELECT topic, fluency, grammar, created_at
+            FROM reports
+            ORDER BY created_at DESC
+        """)).fetchall()
 
     reports = []
 
     for r in rows:
         reports.append({
-            "topic": r[0],
-            "fluency": r[1],
-            "grammar": r[2],
-            "date": r[3].strftime("%Y-%m-%d")
+            "topic": r.topic,
+            "fluency": r.fluency,
+            "grammar": r.grammar,
+            "date": str(r.created_at)
         })
 
     return reports
 
-# -----------------------------
-# SCHEDULE CALL
-# -----------------------------
+# ---------------- SCHEDULE CALL ----------------
+
 @app.post("/schedule-call")
 def schedule_call(data: ScheduleCall):
-    return {
-        "status": "success",
-        "message": "Call scheduled successfully",
-        "data": data
-    }
+    with engine.connect() as conn:
+        conn.execute(text("""
+            INSERT INTO calls (topic, scheduled_time, status)
+            VALUES (:topic, :time, 'scheduled')
+        """), {
+            "topic": data.topic,
+            "time": data.time
+        })
+        conn.commit()
 
+    return {"message": "Call scheduled successfully"}
