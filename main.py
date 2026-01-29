@@ -40,27 +40,33 @@ def get_dashboard():
         "grammar_score": 2.1
     }
 
-# -----------------------------
-# REPORTS
-# -----------------------------
 @app.get("/reports")
 def get_reports():
-    return {
-        "reports": [
-            {
-                "date": "2026-01-18",
-                "topic": "Business Meeting",
-                "fluency": 85,
-                "grammar": 88
-            },
-            {
-                "date": "2026-01-16",
-                "topic": "Interview Practice",
-                "fluency": 78,
-                "grammar": 82
-            }
-        ]
-    }
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT topic, fluency, grammar, created_at
+        FROM reports
+        ORDER BY created_at DESC
+    """)
+
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    reports = []
+
+    for r in rows:
+        reports.append({
+            "topic": r[0],
+            "fluency": r[1],
+            "grammar": r[2],
+            "date": r[3].strftime("%Y-%m-%d")
+        })
+
+    return reports
 
 # -----------------------------
 # SCHEDULE CALL
