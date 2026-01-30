@@ -30,9 +30,10 @@ def root():
 def dashboard():
     return {
         "upcoming_call": "Tomorrow 10 AM",
-        "fluency_score": 3.3,
-        "grammar_score": 2.1
+        "fluency_score": 82,
+        "grammar_score": 85
     }
+
 
 @app.get("/reports")
 def reports():
