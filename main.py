@@ -133,3 +133,23 @@ def schedule_call(req: ScheduleRequest):
     conn.close()
 
     return {"status": "scheduled"}
+@app.get("/scheduled")
+def get_scheduled():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT name, topic, datetime FROM schedules ORDER BY datetime DESC")
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return [
+        {
+            "name": r[0],
+            "topic": r[1],
+            "datetime": str(r[2])
+        }
+        for r in rows
+    ]
+
