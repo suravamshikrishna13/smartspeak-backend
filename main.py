@@ -152,4 +152,35 @@ def get_scheduled():
         }
         for r in rows
     ]
+from random import randint
+from datetime import datetime
+
+@app.post("/ai-call")
+def ai_call(data: dict):
+    name = data.get("name")
+    topic = data.get("topic")
+
+    # Fake AI analysis (for now)
+    fluency = randint(70, 95)
+    grammar = randint(70, 95)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
+        (topic, fluency, grammar)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "status": "AI Call Completed",
+        "name": name,
+        "topic": topic,
+        "fluency": fluency,
+        "grammar": grammar
+    }
 
