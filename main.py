@@ -25,27 +25,31 @@ def dashboard():
     }
 @app.get("/reports")
 def reports():
-    conn = get_db_connection()
-    cur = conn.cursor()
+    try:
+        print("Connecting DB...")
+        conn = get_db_connection()
+        print("Connected.")
 
-    cur.execute("""
-        SELECT created_at, topic, fluency, grammar
-        FROM reports
-        ORDER BY created_at DESC
-    """)
+        cur = conn.cursor()
 
-    rows = cur.fetchall()
+        print("Running query...")
+        cur.execute("SELECT created_at, topic, fluency, grammar FROM reports")
 
-    cur.close()
-    conn.close()
+        rows = cur.fetchall()
+        print("Rows:", rows)
 
-    return [
-        {
-            "date": str(r[0]),
-            "topic": r[1],
-            "fluency": r[2],
-            "grammar": r[3]
-        }
-        for r in rows
-    ]
+        cur.close()
+        conn.close()
 
+        return [
+            {
+                "date": str(r[0]),
+                "topic": r[1],
+                "fluency": r[2],
+                "grammar": r[3]
+            }
+            for r in rows
+        ]
+
+    except Exception as e:
+        return {"error": str(e)}
