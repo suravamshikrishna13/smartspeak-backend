@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from twilio.rest import Client
 import psycopg2
 import os
 from random import randint
@@ -16,11 +17,21 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- DB ----------------
+# ---------------- ENV ----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
+TWILIO_PHONE = os.getenv("TWILIO_PHONE")
 
 if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
+
+if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE:
+    raise Exception("Twilio environment variables not set")
+
+twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+
+# ---------------- DB ----------------
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -35,6 +46,7 @@ class ScheduleRequest(BaseModel):
 class AICallRequest(BaseModel):
     name: str
     topic: str
+    phone: str
 
 # ---------------- ROUTES ----------------
 
@@ -49,10 +61,16 @@ def dashboard():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT s.datetime, s.topic, r.fluency, r.grammar
+        SELECT 
+            s.datetime,
+            s.topic,
+            r.fluency,
+            r.grammar
         FROM schedules s
-        LEFT JOIN reports r ON TRUE
-        ORDER BY s.datetime DESC, r.created_at DESC
+        LEFT JOIN reports r ON r.created_at = (
+            SELECT MAX(created_at) FROM reports
+        )
+        ORDER BY s.datetime DESC
         LIMIT 1
     """)
 
@@ -146,28 +164,46 @@ def get_scheduled():
         for r in rows
     ]
 
-# AI AGENT
+# AI CALL
 @app.post("/ai-call")
 def ai_call(req: AICallRequest):
+
+    call = twilio_client.calls.create(
+        to=req.phone,
+        from_=TWILIO_PHONE,
+        twiml=f"""
+        <Response>
+            <Say voice="alice">
+                Hello {req.name}. Welcome to SmartSpeak.
+                Today's topic is {req.topic}.
+                Please speak for one minute.
+            </Say>
+            <Pause length="60"/>
+            <Say voice="alice">
+                Thank you. Your session is complete.
+            </Say>
+        </Response>
+        """
+    )
+
     fluency = randint(70, 95)
     grammar = randint(70, 95)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        INSERT INTO reports (topic, fluency, grammar)
-        VALUES (%s,%s,%s)
-    """, (req.topic, fluency, grammar))
+    cur.execute(
+        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
+        (req.topic, fluency, grammar)
+    )
 
     conn.commit()
     cur.close()
     conn.close()
 
     return {
-        "status": "AI Call Completed",
-        "name": req.name,
-        "topic": req.topic,
+        "status": "calling",
+        "sid": call.sid,
         "fluency": fluency,
         "grammar": grammar
     }
