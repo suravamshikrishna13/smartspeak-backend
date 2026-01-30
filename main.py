@@ -85,3 +85,26 @@ def reports():
         }
         for r in rows
     ]
+from pydantic import BaseModel
+
+class ScheduleRequest(BaseModel):
+    name: str
+    topic: str
+    datetime: str
+
+
+@app.post("/schedule")
+def schedule_call(req: ScheduleRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO schedules (name, topic, datetime)
+        VALUES (%s, %s, %s)
+    """, (req.name, req.topic, req.datetime))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "scheduled"}
