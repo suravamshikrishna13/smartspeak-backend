@@ -153,14 +153,12 @@ def get_scheduled():
         for r in rows
     ]
 from random import randint
-from datetime import datetime
 
 @app.post("/ai-call")
 def ai_call(data: dict):
     name = data.get("name")
     topic = data.get("topic")
 
-    # Fake AI analysis (for now)
     fluency = randint(70, 95)
     grammar = randint(70, 95)
 
@@ -183,4 +181,5 @@ def ai_call(data: dict):
         "fluency": fluency,
         "grammar": grammar
     }
+
 
