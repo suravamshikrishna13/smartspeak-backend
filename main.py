@@ -23,14 +23,13 @@ def dashboard():
         "fluency_score": 3.3,
         "grammar_score": 2.1
     }
-
 @app.get("/reports")
 def reports():
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT created_at, fluency_score, grammar_score
+        SELECT created_at, topic, fluency, grammar
         FROM reports
         ORDER BY created_at DESC
     """)
@@ -43,8 +42,10 @@ def reports():
     return [
         {
             "date": str(r[0]),
-            "fluency": r[1],
-            "grammar": r[2]
+            "topic": r[1],
+            "fluency": r[2],
+            "grammar": r[3]
         }
         for r in rows
     ]
+
