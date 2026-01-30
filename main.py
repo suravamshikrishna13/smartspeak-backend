@@ -50,6 +50,37 @@ def reports():
         }
         for r in rows
     ]
+@app.get("/dashboard")
+def dashboard():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    # Latest scheduled call
+    cur.execute("""
+        SELECT scheduled_time
+        FROM scheduled_calls
+        ORDER BY scheduled_time DESC
+        LIMIT 1
+    """)
+    call = cur.fetchone()
+
+    # Latest report
+    cur.execute("""
+        SELECT fluency, grammar
+        FROM reports
+        ORDER BY created_at DESC
+        LIMIT 1
+    """)
+    report = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    return {
+        "upcoming_call": str(call[0]) if call else "No calls",
+        "fluency_score": report[0] if report else 0,
+        "grammar_score": report[1] if report else 0
+    }
 
 # ---------------- SCHEDULE CALL -----------------
 
