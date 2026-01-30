@@ -29,7 +29,12 @@ def reports():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("SELECT date, topic, fluency, grammar FROM reports")
+    cur.execute("""
+        SELECT created_at, fluency_score, grammar_score
+        FROM reports
+        ORDER BY created_at DESC
+    """)
+
     rows = cur.fetchall()
 
     cur.close()
@@ -38,9 +43,8 @@ def reports():
     return [
         {
             "date": str(r[0]),
-            "topic": r[1],
-            "fluency": r[2],
-            "grammar": r[3]
+            "fluency": r[1],
+            "grammar": r[2]
         }
         for r in rows
     ]
