@@ -1,27 +1,33 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 import os
 
 app = FastAPI()
 
-# Get DATABASE_URL from Render Environment
+# ---------------- CORS ----------------
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # allow frontend
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# ---------------- DB ----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 
-if DATABASE_URL is None:
-    raise Exception("DATABASE_URL environment variable not set")
-
-# ---------------- DB CONNECTION ----------------
+if not DATABASE_URL:
+    raise Exception("DATABASE_URL not set")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# ---------------- ROOT ----------------
+# ---------------- ROUTES ----------------
 
 @app.get("/")
 def root():
-    return {"message": "SmartSpeak Backend Running"}
-
-# ---------------- DASHBOARD ----------------
+    return {"status": "SmartSpeak backend running"}
 
 @app.get("/dashboard")
 def dashboard():
@@ -40,20 +46,19 @@ def dashboard():
     cur.close()
     conn.close()
 
-    if row is None:
+    if row:
         return {
-            "upcoming_call": "Not scheduled",
-            "fluency_score": 0,
-            "grammar_score": 0
+            "upcoming_call": str(row[0]),
+            "fluency_score": row[1],
+            "grammar_score": row[2],
         }
 
     return {
-        "upcoming_call": str(row[0]),
-        "fluency_score": row[1],
-        "grammar_score": row[2]
+        "upcoming_call": None,
+        "fluency_score": 0,
+        "grammar_score": 0,
     }
 
-# ---------------- REPORTS ----------------
 
 @app.get("/reports")
 def reports():
@@ -76,7 +81,7 @@ def reports():
             "date": str(r[0]),
             "topic": r[1],
             "fluency": r[2],
-            "grammar": r[3]
+            "grammar": r[3],
         }
         for r in rows
     ]
