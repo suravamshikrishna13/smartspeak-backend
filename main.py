@@ -1,14 +1,16 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 import psycopg2
 import os
+from random import randint
 
 app = FastAPI()
 
 # ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # allow frontend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -23,21 +25,34 @@ if not DATABASE_URL:
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
+# ---------------- MODELS ----------------
+
+class ScheduleRequest(BaseModel):
+    name: str
+    topic: str
+    datetime: str
+
+class AICallRequest(BaseModel):
+    name: str
+    topic: str
+
 # ---------------- ROUTES ----------------
 
 @app.get("/")
 def root():
     return {"status": "SmartSpeak backend running"}
 
+# DASHBOARD
 @app.get("/dashboard")
 def dashboard():
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT created_at, fluency, grammar
-        FROM reports
-        ORDER BY created_at DESC
+        SELECT s.datetime, s.topic, r.fluency, r.grammar
+        FROM schedules s
+        LEFT JOIN reports r ON TRUE
+        ORDER BY s.datetime DESC, r.created_at DESC
         LIMIT 1
     """)
 
@@ -49,17 +64,19 @@ def dashboard():
     if row:
         return {
             "upcoming_call": str(row[0]),
-            "fluency_score": row[1],
-            "grammar_score": row[2],
+            "topic": row[1],
+            "fluency_score": row[2] or 0,
+            "grammar_score": row[3] or 0
         }
 
     return {
         "upcoming_call": None,
+        "topic": None,
         "fluency_score": 0,
-        "grammar_score": 0,
+        "grammar_score": 0
     }
 
-
+# REPORTS
 @app.get("/reports")
 def reports():
     conn = get_db_connection()
@@ -81,43 +98,12 @@ def reports():
             "date": str(r[0]),
             "topic": r[1],
             "fluency": r[2],
-            "grammar": r[3],
+            "grammar": r[3]
         }
         for r in rows
     ]
-from fastapi import Body
 
-@app.post("/schedule")
-def schedule_call(data: dict = Body(...)):
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    name = data.get("name")
-    topic = data.get("topic")
-    datetime = data.get("datetime")
-
-    cur.execute(
-        """
-        INSERT INTO schedules (name, topic, datetime)
-        VALUES (%s, %s, %s)
-        """,
-        (name, topic, datetime)
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"status": "scheduled"}
-
-from pydantic import BaseModel
-
-class ScheduleRequest(BaseModel):
-    name: str
-    topic: str
-    datetime: str
-
-
+# SCHEDULE CALL
 @app.post("/schedule")
 def schedule_call(req: ScheduleRequest):
     conn = get_db_connection()
@@ -125,7 +111,7 @@ def schedule_call(req: ScheduleRequest):
 
     cur.execute("""
         INSERT INTO schedules (name, topic, datetime)
-        VALUES (%s, %s, %s)
+        VALUES (%s,%s,%s)
     """, (req.name, req.topic, req.datetime))
 
     conn.commit()
@@ -133,12 +119,19 @@ def schedule_call(req: ScheduleRequest):
     conn.close()
 
     return {"status": "scheduled"}
+
+# GET SCHEDULED
 @app.get("/scheduled")
 def get_scheduled():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("SELECT name, topic, datetime FROM schedules ORDER BY datetime DESC")
+    cur.execute("""
+        SELECT name, topic, datetime
+        FROM schedules
+        ORDER BY datetime DESC
+    """)
+
     rows = cur.fetchall()
 
     cur.close()
@@ -152,23 +145,20 @@ def get_scheduled():
         }
         for r in rows
     ]
-from random import randint
 
+# AI AGENT
 @app.post("/ai-call")
-def ai_call(data: dict):
-    name = data.get("name")
-    topic = data.get("topic")
-
+def ai_call(req: AICallRequest):
     fluency = randint(70, 95)
     grammar = randint(70, 95)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
-        (topic, fluency, grammar)
-    )
+    cur.execute("""
+        INSERT INTO reports (topic, fluency, grammar)
+        VALUES (%s,%s,%s)
+    """, (req.topic, fluency, grammar))
 
     conn.commit()
     cur.close()
@@ -176,10 +166,8 @@ def ai_call(data: dict):
 
     return {
         "status": "AI Call Completed",
-        "name": name,
-        "topic": topic,
+        "name": req.name,
+        "topic": req.topic,
         "fluency": fluency,
         "grammar": grammar
     }
-
-
