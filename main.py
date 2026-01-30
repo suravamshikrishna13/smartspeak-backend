@@ -5,19 +5,15 @@ import os
 
 app = FastAPI()
 
-# ✅ CORS FIX
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],   # allow all (for development)
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
 DATABASE_URL = os.getenv("DATABASE_URL")
-
-if DATABASE_URL is None:
-    raise Exception("DATABASE_URL environment variable not set")
 
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
@@ -30,22 +26,16 @@ def root():
 def dashboard():
     return {
         "upcoming_call": "Tomorrow 10 AM",
-        "fluency_score": 82,
-        "grammar_score": 85
+        "fluency_score": 3.3,
+        "grammar_score": 2.1
     }
-
 
 @app.get("/reports")
 def reports():
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT created_at, topic, fluency, grammar
-        FROM reports
-        ORDER BY created_at DESC
-    """)
-
+    cur.execute("SELECT created_at, topic, fluency, grammar FROM reports ORDER BY created_at DESC")
     rows = cur.fetchall()
 
     cur.close()
@@ -60,3 +50,28 @@ def reports():
         }
         for r in rows
     ]
+
+# ---------------- SCHEDULE CALL -----------------
+
+@app.post("/schedule")
+def schedule_call(payload: dict):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        INSERT INTO scheduled_calls (name, topic, scheduled_time)
+        VALUES (%s, %s, %s)
+        """,
+        (
+            payload["name"],
+            payload["topic"],
+            payload["scheduled_time"]
+        )
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "scheduled"}
