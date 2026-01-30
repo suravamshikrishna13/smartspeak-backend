@@ -85,6 +85,31 @@ def reports():
         }
         for r in rows
     ]
+from fastapi import Body
+
+@app.post("/schedule")
+def schedule_call(data: dict = Body(...)):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    name = data.get("name")
+    topic = data.get("topic")
+    datetime = data.get("datetime")
+
+    cur.execute(
+        """
+        INSERT INTO schedules (name, topic, datetime)
+        VALUES (%s, %s, %s)
+        """,
+        (name, topic, datetime)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "scheduled"}
+
 from pydantic import BaseModel
 
 class ScheduleRequest(BaseModel):
