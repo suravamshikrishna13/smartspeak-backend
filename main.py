@@ -1,8 +1,18 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 import psycopg2
 import os
 
 app = FastAPI()
+
+# ✅ CORS FIX
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],   # allow all (for development)
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -23,33 +33,29 @@ def dashboard():
         "fluency_score": 3.3,
         "grammar_score": 2.1
     }
+
 @app.get("/reports")
 def reports():
-    try:
-        print("Connecting DB...")
-        conn = get_db_connection()
-        print("Connected.")
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-        cur = conn.cursor()
+    cur.execute("""
+        SELECT created_at, topic, fluency, grammar
+        FROM reports
+        ORDER BY created_at DESC
+    """)
 
-        print("Running query...")
-        cur.execute("SELECT created_at, topic, fluency, grammar FROM reports")
+    rows = cur.fetchall()
 
-        rows = cur.fetchall()
-        print("Rows:", rows)
+    cur.close()
+    conn.close()
 
-        cur.close()
-        conn.close()
-
-        return [
-            {
-                "date": str(r[0]),
-                "topic": r[1],
-                "fluency": r[2],
-                "grammar": r[3]
-            }
-            for r in rows
-        ]
-
-    except Exception as e:
-        return {"error": str(e)}
+    return [
+        {
+            "date": str(r[0]),
+            "topic": r[1],
+            "fluency": r[2],
+            "grammar": r[3]
+        }
+        for r in rows
+    ]
