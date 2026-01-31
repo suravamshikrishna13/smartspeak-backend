@@ -257,4 +257,28 @@ def save_recording(data: dict):
     conn.close()
 
     return {"status": "recording saved"}
+from fastapi import Request
+
+@app.post("/twilio-recording")
+async def twilio_recording(request: Request):
+    form = await request.form()
+
+    recording_url = form.get("RecordingUrl")
+
+    print("Recording URL:", recording_url)
+
+    if recording_url:
+        conn = get_db_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            "INSERT INTO recordings (audio_url) VALUES (%s)",
+            (recording_url,)
+        )
+
+        conn.commit()
+        cur.close()
+        conn.close()
+
+    return {"status": "saved"}
 
