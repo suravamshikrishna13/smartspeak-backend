@@ -1,14 +1,16 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
-from twilio.rest import Client
 import psycopg2
 import os
 from random import randint
+from twilio.rest import Client
+
+# ---------------- APP ----------------
 
 app = FastAPI()
 
-# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,6 +20,7 @@ app.add_middleware(
 )
 
 # ---------------- ENV ----------------
+
 DATABASE_URL = os.getenv("DATABASE_URL")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
@@ -61,16 +64,10 @@ def dashboard():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT 
-            s.datetime,
-            s.topic,
-            r.fluency,
-            r.grammar
+        SELECT s.datetime, s.topic, r.fluency, r.grammar
         FROM schedules s
-        LEFT JOIN reports r ON r.created_at = (
-            SELECT MAX(created_at) FROM reports
-        )
-        ORDER BY s.datetime DESC
+        LEFT JOIN reports r ON TRUE
+        ORDER BY s.datetime DESC, r.created_at DESC
         LIMIT 1
     """)
 
@@ -121,7 +118,7 @@ def reports():
         for r in rows
     ]
 
-# SCHEDULE CALL
+# SCHEDULE
 @app.post("/schedule")
 def schedule_call(req: ScheduleRequest):
     conn = get_db_connection()
@@ -163,37 +160,54 @@ def get_scheduled():
         }
         for r in rows
     ]
-from fastapi import Form
 
-@app.post("/ai-call")
-def ai_call(data: dict):
-    name = data.get("name")
-    topic = data.get("topic")
-    phone = data.get("phone")   # ✅ ADD THIS
+# ---------------- AI CALL (OUTBOUND) ----------------
 
-    if not phone:
-        return {"error": "Phone number required"}
+@app.post("/start-call")
+def start_call(req: AICallRequest):
 
     call = twilio_client.calls.create(
-        to=phone,
+        to=req.phone,
         from_=TWILIO_PHONE,
-        record=True,
-        recording_status_callback="https://smartspeak-backend-orit.onrender.com/twilio-recording",
-        recording_status_callback_event=["completed"],
-        twiml=f"""
-        <Response>
-            <Say voice="alice">
-                Hello {name}. Welcome to SmartSpeak.
-                Today's topic is {topic}.
-                Please speak for one minute.
-            </Say>
-            <Pause length="60"/>
-            <Say voice="alice">
-                Thank you. Your session is complete.
-            </Say>
-        </Response>
-        """
+        url="https://smartspeak-backend-orit.onrender.com/ai-call"
     )
+
+    return {"status": "calling", "sid": call.sid}
+
+# ---------------- TWILIO VOICE FLOW ----------------
+
+@app.post("/ai-call", response_class=PlainTextResponse)
+async def ai_call(request: Request):
+
+    twiml = """
+<Response>
+    <Say voice="alice">
+        Hello. Welcome to SmartSpeak.
+        Please speak for one minute.
+    </Say>
+
+    <Record
+        timeout="5"
+        maxLength="60"
+        action="/save-recording"
+        method="POST"
+    />
+
+    <Say voice="alice">
+        Thank you. Your session is complete.
+    </Say>
+</Response>
+"""
+
+    return twiml
+
+# ---------------- SAVE RECORDING ----------------
+
+@app.post("/save-recording")
+async def save_recording(request: Request):
+    form = await request.form()
+
+    recording_url = form.get("RecordingUrl")
 
     fluency = randint(70, 95)
     grammar = randint(70, 95)
@@ -201,84 +215,20 @@ def ai_call(data: dict):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
-        (topic, fluency, grammar)
-    )
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {
-        "status": "calling",
-        "sid": call.sid,
-        "fluency": fluency,
-        "grammar": grammar
-    }
-
-   
-@app.post("/recording-complete")
-def recording_complete(RecordingUrl: str = Form(...)):
-
-    print("Recording URL:", RecordingUrl)
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
+    # save recording
     cur.execute("""
         INSERT INTO recordings (audio_url)
         VALUES (%s)
-    """, (RecordingUrl,))
+    """, (recording_url,))
 
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return {"status": "recording saved"}
-@app.post("/recording")
-def save_recording(data: dict):
-    recording_url = data.get("RecordingUrl")
-    call_sid = data.get("CallSid")
-
-    if not recording_url:
-        return {"status": "no recording"}
-
-    conn = get_db_connection()
-    cur = conn.cursor()
-
+    # save report
     cur.execute("""
-        INSERT INTO recordings (call_sid, recording_url)
-        VALUES (%s,%s)
-    """, (call_sid, recording_url))
+        INSERT INTO reports (topic, fluency, grammar)
+        VALUES (%s,%s,%s)
+    """, ("AI Practice", fluency, grammar))
 
     conn.commit()
     cur.close()
     conn.close()
-
-    return {"status": "recording saved"}
-from fastapi import Request
-
-@app.post("/twilio-recording")
-async def twilio_recording(request: Request):
-    form = await request.form()
-
-    recording_url = form.get("RecordingUrl")
-
-    print("Recording URL:", recording_url)
-
-    if recording_url:
-        conn = get_db_connection()
-        cur = conn.cursor()
-
-        cur.execute(
-            "INSERT INTO recordings (audio_url) VALUES (%s)",
-            (recording_url,)
-        )
-
-        conn.commit()
-        cur.close()
-        conn.close()
 
     return {"status": "saved"}
-
