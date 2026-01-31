@@ -163,47 +163,58 @@ def get_scheduled():
         }
         for r in rows
     ]
+from fastapi import Form
 
-# AI CALL
 @app.post("/ai-call")
 def ai_call(req: AICallRequest):
+
+    twiml = f"""
+<Response>
+  <Say voice="alice">
+    Hello {req.name}. Welcome to SmartSpeak.
+    Today's topic is {req.topic}.
+    Please speak for one minute.
+  </Say>
+
+  <Record
+    timeout="60"
+    maxLength="60"
+    playBeep="true"
+    action="https://smartspeak-backend-orit.onrender.com/recording-complete"
+  />
+
+  <Say voice="alice">
+    Thank you. Your session is complete.
+  </Say>
+</Response>
+"""
 
     call = twilio_client.calls.create(
         to=req.phone,
         from_=TWILIO_PHONE,
-        twiml=f"""
-        <Response>
-            <Say voice="alice">
-                Hello {req.name}. Welcome to SmartSpeak.
-                Today's topic is {req.topic}.
-                Please speak for one minute.
-            </Say>
-            <Pause length="60"/>
-            <Say voice="alice">
-                Thank you. Your session is complete.
-            </Say>
-        </Response>
-        """
+        twiml=twiml
     )
 
-    fluency = randint(70, 95)
-    grammar = randint(70, 95)
+    return {
+        "status": "calling",
+        "sid": call.sid
+    }
+@app.post("/recording-complete")
+def recording_complete(RecordingUrl: str = Form(...)):
+
+    print("Recording URL:", RecordingUrl)
 
     conn = get_db_connection()
     cur = conn.cursor()
 
-    cur.execute(
-        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
-        (req.topic, fluency, grammar)
-    )
+    cur.execute("""
+        INSERT INTO recordings (audio_url)
+        VALUES (%s)
+    """, (RecordingUrl,))
 
     conn.commit()
     cur.close()
     conn.close()
 
-    return {
-        "status": "calling",
-        "sid": call.sid,
-        "fluency": fluency,
-        "grammar": grammar
-    }
+    return {"status": "recording saved"}
+
