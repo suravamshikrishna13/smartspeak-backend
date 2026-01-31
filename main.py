@@ -1,6 +1,6 @@
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import Response
 from pydantic import BaseModel
 import psycopg2
 import os
@@ -30,7 +30,7 @@ if not DATABASE_URL:
     raise Exception("DATABASE_URL not set")
 
 if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE:
-    raise Exception("Twilio environment variables not set")
+    raise Exception("Twilio env vars missing")
 
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
@@ -46,28 +46,26 @@ class ScheduleRequest(BaseModel):
     topic: str
     datetime: str
 
-class AICallRequest(BaseModel):
-    name: str
-    topic: str
+class StartCallRequest(BaseModel):
     phone: str
 
-# ---------------- ROUTES ----------------
+# ---------------- ROOT ----------------
 
 @app.get("/")
 def root():
     return {"status": "SmartSpeak backend running"}
 
-# DASHBOARD
+# ---------------- DASHBOARD ----------------
+
 @app.get("/dashboard")
 def dashboard():
     conn = get_db_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT s.datetime, s.topic, r.fluency, r.grammar
-        FROM schedules s
-        LEFT JOIN reports r ON TRUE
-        ORDER BY s.datetime DESC, r.created_at DESC
+        SELECT created_at, fluency, grammar
+        FROM reports
+        ORDER BY created_at DESC
         LIMIT 1
     """)
 
@@ -79,19 +77,18 @@ def dashboard():
     if row:
         return {
             "upcoming_call": str(row[0]),
-            "topic": row[1],
-            "fluency_score": row[2] or 0,
-            "grammar_score": row[3] or 0
+            "fluency_score": row[1],
+            "grammar_score": row[2],
         }
 
     return {
         "upcoming_call": None,
-        "topic": None,
         "fluency_score": 0,
-        "grammar_score": 0
+        "grammar_score": 0,
     }
 
-# REPORTS
+# ---------------- REPORTS ----------------
+
 @app.get("/reports")
 def reports():
     conn = get_db_connection()
@@ -118,9 +115,10 @@ def reports():
         for r in rows
     ]
 
-# SCHEDULE
+# ---------------- SCHEDULE ----------------
+
 @app.post("/schedule")
-def schedule_call(req: ScheduleRequest):
+def schedule(req: ScheduleRequest):
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -135,36 +133,10 @@ def schedule_call(req: ScheduleRequest):
 
     return {"status": "scheduled"}
 
-# GET SCHEDULED
-@app.get("/scheduled")
-def get_scheduled():
-    conn = get_db_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
-        SELECT name, topic, datetime
-        FROM schedules
-        ORDER BY datetime DESC
-    """)
-
-    rows = cur.fetchall()
-
-    cur.close()
-    conn.close()
-
-    return [
-        {
-            "name": r[0],
-            "topic": r[1],
-            "datetime": str(r[2])
-        }
-        for r in rows
-    ]
-
-# ---------------- AI CALL (OUTBOUND) ----------------
+# ---------------- START CALL (FROM FRONTEND) ----------------
 
 @app.post("/start-call")
-def start_call(req: AICallRequest):
+def start_call(req: StartCallRequest):
 
     call = twilio_client.calls.create(
         to=req.phone,
@@ -176,10 +148,9 @@ def start_call(req: AICallRequest):
 
 # ---------------- TWILIO VOICE FLOW ----------------
 
-@app.post("/ai-call", response_class=PlainTextResponse)
-async def ai_call(request: Request):
-
-    twiml = """
+@app.post("/ai-call")
+async def ai_call():
+    twiml = """<?xml version="1.0" encoding="UTF-8"?>
 <Response>
     <Say voice="alice">
         Hello. Welcome to SmartSpeak.
@@ -187,28 +158,25 @@ async def ai_call(request: Request):
     </Say>
 
     <Record
-    timeout="5"
-    maxLength="60"
-    action="https://smartspeak-backend-orit.onrender.com/save-recording"
-    recordingStatusCallback="https://smartspeak-backend-orit.onrender.com/save-recording"
-    method="POST"
-/>
-
+        timeout="5"
+        maxLength="60"
+        action="https://smartspeak-backend-orit.onrender.com/save-recording"
+        method="POST"
+    />
 
     <Say voice="alice">
         Thank you. Your session is complete.
     </Say>
 </Response>
 """
-
-    return twiml
+    return Response(content=twiml, media_type="text/xml")
 
 # ---------------- SAVE RECORDING ----------------
 
 @app.post("/save-recording")
 async def save_recording(request: Request):
-    form = await request.form()
 
+    form = await request.form()
     recording_url = form.get("RecordingUrl")
 
     fluency = randint(70, 95)
@@ -217,13 +185,11 @@ async def save_recording(request: Request):
     conn = get_db_connection()
     cur = conn.cursor()
 
-    # save recording
     cur.execute("""
         INSERT INTO recordings (audio_url)
         VALUES (%s)
     """, (recording_url,))
 
-    # save report
     cur.execute("""
         INSERT INTO reports (topic, fluency, grammar)
         VALUES (%s,%s,%s)
