@@ -187,11 +187,13 @@ async def ai_call(request: Request):
     </Say>
 
     <Record
-        timeout="5"
-        maxLength="60"
-        action="/save-recording"
-        method="POST"
-    />
+    timeout="5"
+    maxLength="60"
+    action="https://smartspeak-backend-orit.onrender.com/save-recording"
+    recordingStatusCallback="https://smartspeak-backend-orit.onrender.com/save-recording"
+    method="POST"
+/>
+
 
     <Say voice="alice">
         Thank you. Your session is complete.
