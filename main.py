@@ -188,17 +188,27 @@ def ai_call(req: AICallRequest):
   </Say>
 </Response>
 """
-
-    call = twilio_client.calls.create(
-        to=req.phone,
-        from_=TWILIO_PHONE,
-        twiml=twiml
-    )
-
-    return {
-        "status": "calling",
-        "sid": call.sid
-    }
+call = twilio_client.calls.create(
+    to=phone,
+    from_=TWILIO_PHONE,
+    record=True,
+    recording_status_callback="https://smartspeak-backend-orit.onrender.com/recording",
+    recording_status_callback_method="POST",
+    twiml=f"""
+    <Response>
+        <Say voice="alice">
+            Hello {name}. Welcome to SmartSpeak.
+            Today's topic is {topic}.
+            Please speak for one minute.
+        </Say>
+        <Pause length="60"/>
+        <Say voice="alice">
+            Thank you. Your session is complete.
+        </Say>
+    </Response>
+    """
+)
+   
 @app.post("/recording-complete")
 def recording_complete(RecordingUrl: str = Form(...)):
 
@@ -211,6 +221,27 @@ def recording_complete(RecordingUrl: str = Form(...)):
         INSERT INTO recordings (audio_url)
         VALUES (%s)
     """, (RecordingUrl,))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "recording saved"}
+@app.post("/recording")
+def save_recording(data: dict):
+    recording_url = data.get("RecordingUrl")
+    call_sid = data.get("CallSid")
+
+    if not recording_url:
+        return {"status": "no recording"}
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        INSERT INTO recordings (call_sid, recording_url)
+        VALUES (%s,%s)
+    """, (call_sid, recording_url))
 
     conn.commit()
     cur.close()
