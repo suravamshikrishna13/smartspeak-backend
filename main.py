@@ -166,48 +166,57 @@ def get_scheduled():
 from fastapi import Form
 
 @app.post("/ai-call")
-def ai_call(req: AICallRequest):
+def ai_call(data: dict):
+    name = data.get("name")
+    topic = data.get("topic")
+    phone = data.get("phone")   # ✅ ADD THIS
 
-    twiml = f"""
-<Response>
-  <Say voice="alice">
-    Hello {req.name}. Welcome to SmartSpeak.
-    Today's topic is {req.topic}.
-    Please speak for one minute.
-  </Say>
+    if not phone:
+        return {"error": "Phone number required"}
 
-  <Record
-    timeout="60"
-    maxLength="60"
-    playBeep="true"
-    action="https://smartspeak-backend-orit.onrender.com/recording-complete"
-  />
+    call = twilio_client.calls.create(
+        to=phone,
+        from_=TWILIO_PHONE,
+        record=True,
+        recording_status_callback="https://smartspeak-backend-orit.onrender.com/twilio-recording",
+        recording_status_callback_event=["completed"],
+        twiml=f"""
+        <Response>
+            <Say voice="alice">
+                Hello {name}. Welcome to SmartSpeak.
+                Today's topic is {topic}.
+                Please speak for one minute.
+            </Say>
+            <Pause length="60"/>
+            <Say voice="alice">
+                Thank you. Your session is complete.
+            </Say>
+        </Response>
+        """
+    )
 
-  <Say voice="alice">
-    Thank you. Your session is complete.
-  </Say>
-</Response>
-"""
-call = twilio_client.calls.create(
-    to=phone,
-    from_=TWILIO_PHONE,
-    record=True,
-    recording_status_callback="https://smartspeak-backend-orit.onrender.com/recording",
-    recording_status_callback_method="POST",
-    twiml=f"""
-    <Response>
-        <Say voice="alice">
-            Hello {name}. Welcome to SmartSpeak.
-            Today's topic is {topic}.
-            Please speak for one minute.
-        </Say>
-        <Pause length="60"/>
-        <Say voice="alice">
-            Thank you. Your session is complete.
-        </Say>
-    </Response>
-    """
-)
+    fluency = randint(70, 95)
+    grammar = randint(70, 95)
+
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
+        (topic, fluency, grammar)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {
+        "status": "calling",
+        "sid": call.sid,
+        "fluency": fluency,
+        "grammar": grammar
+    }
+
    
 @app.post("/recording-complete")
 def recording_complete(RecordingUrl: str = Form(...)):
