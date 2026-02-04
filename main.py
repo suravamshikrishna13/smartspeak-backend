@@ -1,13 +1,15 @@
-from fastapi import FastAPI, Request, Form
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from twilio.twiml.voice_response import VoiceResponse, Gather
-from twilio.rest import Client
+from fastapi.responses import Response
+from pydantic import BaseModel
 import psycopg2
 import os
-import openai
+from twilio.rest import Client
+from random import randint
 
 app = FastAPI()
 
+# ---------------- CORS ----------------
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,108 +18,158 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# ---------------- ENV ----------------
 DATABASE_URL = os.getenv("DATABASE_URL")
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE = os.getenv("TWILIO_PHONE")
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-openai.api_key = OPENAI_API_KEY
 twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 
-def get_db():
+# ---------------- DB ----------------
+def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# ---------- ROOT ----------
+# ---------------- MODELS ----------------
+
+class ScheduleRequest(BaseModel):
+    name: str
+    topic: str
+    datetime: str
+
+# ---------------- ROOT ----------------
 
 @app.get("/")
 def root():
-    return {"status": "SmartSpeak AI running"}
+    return {"status": "SmartSpeak running"}
 
-# ---------- START CALL ----------
+# ---------------- DASHBOARD ----------------
 
-from fastapi import Query, HTTPException
+@app.get("/dashboard")
+def dashboard():
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-@app.post("/start-call")
-def start_call(phone: str = Query(...)):
-    try:
-        if not phone:
-            raise HTTPException(status_code=400, detail="Phone number missing")
+    cur.execute("""
+        SELECT s.datetime, s.topic, r.fluency, r.grammar
+        FROM schedules s
+        LEFT JOIN reports r ON TRUE
+        ORDER BY s.datetime DESC, r.created_at DESC
+        LIMIT 1
+    """)
 
-        if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE:
-            raise HTTPException(status_code=500, detail="Twilio env vars missing")
+    row = cur.fetchone()
 
-        call = twilio_client.calls.create(
-            to=phone,
-            from_=TWILIO_PHONE,
-            url="https://smartspeak-backend-orit.onrender.com/voice"
-        )
+    cur.close()
+    conn.close()
 
+    if row:
         return {
-            "status": "call started",
-            "sid": call.sid
+            "upcoming_call": str(row[0]),
+            "topic": row[1],
+            "fluency": row[2] or 0,
+            "grammar": row[3] or 0
         }
 
-    except Exception as e:
-        print("START CALL ERROR:", str(e))
-        raise HTTPException(status_code=500, detail=str(e))
+    return {}
 
+# ---------------- REPORTS ----------------
 
-# ---------- TWILIO ENTRY ----------
+@app.get("/reports")
+def reports():
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT created_at, topic, fluency, grammar FROM reports ORDER BY created_at DESC")
+    rows = cur.fetchall()
+
+    cur.close()
+    conn.close()
+
+    return [{"date": str(r[0]), "topic": r[1], "fluency": r[2], "grammar": r[3]} for r in rows]
+
+# ---------------- SCHEDULE ----------------
+
+@app.post("/schedule")
+def schedule(req: ScheduleRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO schedules (name, topic, datetime) VALUES (%s,%s,%s)",
+        (req.name, req.topic, req.datetime)
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return {"status": "scheduled"}
+
+# ---------------- START CALL ----------------
+
+@app.post("/start-call")
+def start_call(phone: str):
+    call = twilio_client.calls.create(
+        to=phone,
+        from_=TWILIO_PHONE,
+        url="https://smartspeak-backend-orit.onrender.com/voice"
+    )
+
+    return {"sid": call.sid}
+
+# ---------------- VOICE ENTRY ----------------
 
 @app.post("/voice")
 async def voice():
-    vr = VoiceResponse()
 
-    vr.say("Hello. I am your Smart Speak AI coach. Tell me about yourself.")
+    twiml = """
+<Response>
+    <Say voice="alice">
+        Hello! Welcome to Smart Speak.
+        Please tell me about your day.
+    </Say>
 
-    gather = Gather(
-        input="speech",
-        action="/process",
-        method="POST",
-        speech_timeout="auto"
-    )
+    <Gather input="speech" timeout="6" action="/process" method="POST">
+        <Say voice="alice">I am listening.</Say>
+    </Gather>
 
-    vr.append(gather)
-    return str(vr)
+    <Say voice="alice">Goodbye.</Say>
+</Response>
+"""
 
-# ---------- PROCESS SPEECH ----------
+    return Response(content=twiml, media_type="application/xml")
+
+# ---------------- PROCESS SPEECH ----------------
 
 @app.post("/process")
 async def process(request: Request):
 
     form = await request.form()
-    user_text = form.get("SpeechResult")
+    speech = form.get("SpeechResult", "")
 
-    vr = VoiceResponse()
+    fluency = randint(70, 95)
+    grammar = randint(70, 95)
 
-    if not user_text:
-        vr.say("Sorry, I did not hear you.")
-        vr.redirect("/voice")
-        return str(vr)
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are a friendly English speaking coach. Ask questions, correct grammar softly, encourage fluency."
-            },
-            {"role": "user", "content": user_text}
-        ]
+    cur.execute(
+        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
+        ("conversation", fluency, grammar)
     )
 
-    reply = completion.choices[0].message.content
+    conn.commit()
+    cur.close()
+    conn.close()
 
-    vr.say(reply)
+    reply = "Thank you for speaking. You are improving every day."
 
-    gather = Gather(
-        input="speech",
-        action="/process",
-        method="POST",
-        speech_timeout="auto"
-    )
+    twiml = f"""
+<Response>
+    <Say voice="alice">{reply}</Say>
+    <Hangup/>
+</Response>
+"""
 
-    vr.append(gather)
-
-    return str(vr)
+    return Response(content=twiml, media_type="application/xml")
