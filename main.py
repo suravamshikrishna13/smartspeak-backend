@@ -36,14 +36,32 @@ def root():
 
 # ---------- START CALL ----------
 
+from fastapi import Query, HTTPException
+
 @app.post("/start-call")
-def start_call(phone: str):
-    call = twilio_client.calls.create(
-        to=phone,
-        from_=TWILIO_PHONE,
-        url="https://smartspeak-backend-orit.onrender.com/voice"
-    )
-    return {"sid": call.sid}
+def start_call(phone: str = Query(...)):
+    try:
+        if not phone:
+            raise HTTPException(status_code=400, detail="Phone number missing")
+
+        if not TWILIO_ACCOUNT_SID or not TWILIO_AUTH_TOKEN or not TWILIO_PHONE:
+            raise HTTPException(status_code=500, detail="Twilio env vars missing")
+
+        call = twilio_client.calls.create(
+            to=phone,
+            from_=TWILIO_PHONE,
+            url="https://smartspeak-backend-orit.onrender.com/voice"
+        )
+
+        return {
+            "status": "call started",
+            "sid": call.sid
+        }
+
+    except Exception as e:
+        print("START CALL ERROR:", str(e))
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 # ---------- TWILIO ENTRY ----------
 
