@@ -140,7 +140,9 @@ async def voice():
 
     return Response(content=twiml, media_type="application/xml")
 
-# ---------------- PROCESS SPEECH ----------------
+import openai
+
+openai.api_key = os.getenv("OPENAI_API_KEY")
 
 @app.post("/process")
 async def process(request: Request):
@@ -148,6 +150,33 @@ async def process(request: Request):
     form = await request.form()
     speech = form.get("SpeechResult", "")
 
+    if not speech:
+        twiml = """
+<Response>
+    <Say>I did not hear you. Please try again.</Say>
+    <Redirect>/voice</Redirect>
+</Response>
+"""
+        return Response(content=twiml, media_type="application/xml")
+
+    # ---- GPT CALL ----
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a friendly English speaking coach. Talk casually like a friend. Correct grammar softly. Ask follow-up questions."
+            },
+            {
+                "role": "user",
+                "content": speech
+            }
+        ]
+    )
+
+    reply = completion.choices[0].message.content
+
+    # Save basic report
     fluency = randint(70, 95)
     grammar = randint(70, 95)
 
@@ -163,12 +192,13 @@ async def process(request: Request):
     cur.close()
     conn.close()
 
-    reply = "Thank you for speaking. You are improving every day."
-
+    # ---- Twilio reply + LOOP ----
     twiml = f"""
 <Response>
     <Say voice="alice">{reply}</Say>
-    <Hangup/>
+    <Gather input="speech" timeout="6" action="/process" method="POST">
+        <Say voice="alice">Go on, I am listening.</Say>
+    </Gather>
 </Response>
 """
 
