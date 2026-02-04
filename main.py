@@ -144,20 +144,27 @@ import openai
 
 openai.api_key = os.getenv("OPENAI_API_KEY")
 
-@app.post("/process")
-async def process(request: Request):
+@app.post("/voice")
+async def voice():
 
-    form = await request.form()
-    speech = form.get("SpeechResult", "")
-
-    if not speech:
-        twiml = """
+    twiml = """
 <Response>
-    <Say>I did not hear you. Please try again.</Say>
-    <Redirect>/voice</Redirect>
+    <Say voice="alice">
+        Hello! Welcome to Smart Speak.
+        Please tell me about your day.
+    </Say>
+
+    <Gather input="speech" timeout="6"
+        action="https://smartspeak-backend-orit.onrender.com/process"
+        method="POST">
+        <Say voice="alice">I am listening.</Say>
+    </Gather>
+
+    <Say voice="alice">Goodbye.</Say>
 </Response>
 """
-        return Response(content=twiml, media_type="application/xml")
+
+    return Response(content=twiml, media_type="application/xml")
 
     # ---- GPT CALL ----
     completion = openai.ChatCompletion.create(
