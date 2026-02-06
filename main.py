@@ -1,12 +1,12 @@
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from pydantic import BaseModel
 import psycopg2
 import os
 from twilio.rest import Client
-from random import randint
 import openai
+from random import randint
 
 app = FastAPI()
 
@@ -33,13 +33,6 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 def get_db_connection():
     return psycopg2.connect(DATABASE_URL)
 
-# ---------------- MODELS ----------------
-
-class ScheduleRequest(BaseModel):
-    name: str
-    topic: str
-    datetime: str
-
 # ---------------- ROOT ----------------
 
 @app.get("/")
@@ -64,60 +57,54 @@ async def voice():
 
     twiml = """
 <Response>
-    <Say voice="alice">
-        Hello! I am your SmartSpeak AI friend.
-        Tell me about your day.
-    </Say>
+<Say voice="alice">
+Hello! I am your SmartSpeak AI friend.
+Tell me about your day.
+</Say>
 
-    <Gather input="speech" timeout="6"
-        action="https://smartspeak-backend-orit.onrender.com/process"
-        method="POST">
-        <Say voice="alice">I am listening.</Say>
-    </Gather>
+<Gather input="speech" timeout="6" action="/process" method="POST">
+<Say>I am listening.</Say>
+</Gather>
 </Response>
 """
 
     return Response(content=twiml, media_type="application/xml")
 
-# ---------------- PROCESS SPEECH ----------------
+# ---------------- PROCESS SPEECH (GPT LOOP) ----------------
 
 @app.post("/process")
-async def process(request: Request):
+async def process(SpeechResult: str = Form(None)):
+
+    if not SpeechResult:
+        return Response("""
+<Response>
+<Say>I could not hear you. Please try again.</Say>
+<Redirect>/voice</Redirect>
+</Response>
+""", media_type="application/xml")
+
+    # GPT reply
+    completion = openai.ChatCompletion.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {
+                "role": "system",
+                "content": "You are a friendly English speaking coach. Talk casually like a friend. Correct grammar softly. Ask follow-up questions."
+            },
+            {
+                "role": "user",
+                "content": SpeechResult
+            }
+        ]
+    )
+
+    reply = completion.choices[0].message.content
+
+    # Save report (basic demo scores)
+    fluency = randint(70, 95)
+    grammar = randint(70, 95)
 
     try:
-        form = await request.form()
-        speech = form.get("SpeechResult", "")
-
-        if not speech:
-            twiml = """
-<Response>
-    <Say>I did not hear you. Please try again.</Say>
-    <Redirect>https://smartspeak-backend-orit.onrender.com/voice</Redirect>
-</Response>
-"""
-            return Response(content=twiml, media_type="application/xml")
-
-        # GPT reply
-        completion = openai.ChatCompletion.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a friendly English speaking coach. Talk like a friend. Correct grammar softly. Ask follow-up questions."
-                },
-                {
-                    "role": "user",
-                    "content": speech
-                }
-            ]
-        )
-
-        reply = completion.choices[0].message.content
-
-        # Save report
-        fluency = randint(70, 95)
-        grammar = randint(70, 95)
-
         conn = get_db_connection()
         cur = conn.cursor()
         cur.execute(
@@ -127,29 +114,17 @@ async def process(request: Request):
         conn.commit()
         cur.close()
         conn.close()
-
-        twiml = f"""
-<Response>
-    <Say voice="alice">{reply}</Say>
-
-    <Gather input="speech" timeout="6"
-        action="https://smartspeak-backend-orit.onrender.com/process"
-        method="POST">
-        <Say voice="alice">Go on, I am listening.</Say>
-    </Gather>
-</Response>
-"""
-
-        return Response(content=twiml, media_type="application/xml")
-
     except Exception as e:
+        print("DB ERROR:", e)
 
-        print("PROCESS ERROR:", str(e))
-
-        error_twiml = """
+    twiml = f"""
 <Response>
-    <Say>Something went wrong. Goodbye.</Say>
-    <Hangup/>
+<Say voice="alice">{reply}</Say>
+
+<Gather input="speech" timeout="6" action="/process" method="POST">
+<Say>Go on, I am listening.</Say>
+</Gather>
 </Response>
 """
-        return Response(content=error_twiml, media_type="application/xml")
+
+    return Response(content=twiml, media_type="application/xml")
