@@ -62,7 +62,9 @@ Hello! I am your SmartSpeak AI friend.
 Tell me about your day.
 </Say>
 
-<Gather input="speech" timeout="6" action="/process" method="POST">
+<Gather input="speech" timeout="6"
+ action="https://smartspeak-backend-orit.onrender.com/process"
+ method="POST">
 <Say>I am listening.</Say>
 </Gather>
 </Response>
@@ -85,7 +87,7 @@ async def process(SpeechResult: str = Form(None)):
 
     # GPT reply
     completion = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         messages=[
             {
                 "role": "system",
@@ -120,8 +122,9 @@ async def process(SpeechResult: str = Form(None)):
     twiml = f"""
 <Response>
 <Say voice="alice">{reply}</Say>
-
-<Gather input="speech" timeout="6" action="/process" method="POST">
+<Gather input="speech" timeout="6"
+ action="https://smartspeak-backend-orit.onrender.com/process"
+ method="POST">
 <Say>Go on, I am listening.</Say>
 </Gather>
 </Response>
