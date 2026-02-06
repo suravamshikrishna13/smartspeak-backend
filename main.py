@@ -72,7 +72,10 @@ Tell me about your day.
 
     return Response(content=twiml, media_type="application/xml")
 
-# ---------------- PROCESS SPEECH (GPT LOOP) ----------------
+from fastapi import Form
+from openai import OpenAI
+
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 @app.post("/process")
 async def process(SpeechResult: str = Form(None)):
@@ -81,17 +84,18 @@ async def process(SpeechResult: str = Form(None)):
         return Response("""
 <Response>
 <Say>I could not hear you. Please try again.</Say>
-<Redirect>/voice</Redirect>
+<Redirect>https://smartspeak-backend-orit.onrender.com/voice</Redirect>
 </Response>
 """, media_type="application/xml")
 
-    # GPT reply
-    completion = openai.ChatCompletion.create(
+    print("User said:", SpeechResult)
+
+    completion = client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {
                 "role": "system",
-                "content": "You are a friendly English speaking coach. Talk casually like a friend. Correct grammar softly. Ask follow-up questions."
+                "content": "You are a friendly English speaking coach. Talk casually. Correct grammar softly. Ask follow up questions."
             },
             {
                 "role": "user",
@@ -102,22 +106,19 @@ async def process(SpeechResult: str = Form(None)):
 
     reply = completion.choices[0].message.content
 
-    # Save report (basic demo scores)
-    fluency = randint(70, 95)
-    grammar = randint(70, 95)
+    # save report
+    fluency = randint(70,95)
+    grammar = randint(70,95)
 
-    try:
-        conn = get_db_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
-            ("conversation", fluency, grammar)
-        )
-        conn.commit()
-        cur.close()
-        conn.close()
-    except Exception as e:
-        print("DB ERROR:", e)
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute(
+        "INSERT INTO reports (topic, fluency, grammar) VALUES (%s,%s,%s)",
+        ("conversation", fluency, grammar)
+    )
+    conn.commit()
+    cur.close()
+    conn.close()
 
     twiml = f"""
 <Response>
@@ -131,3 +132,4 @@ async def process(SpeechResult: str = Form(None)):
 """
 
     return Response(content=twiml, media_type="application/xml")
+
