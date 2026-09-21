@@ -31,6 +31,7 @@ twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
 def get_db():
     return psycopg2.connect(DATABASE_URL)
 
+
 # ---------- OLLAMA ----------
 def ask_ai(text):
     try:
@@ -52,15 +53,20 @@ AI:
             timeout=60
         )
 
-        return r.json().get("response", "Sorry, I had trouble thinking.")
+        return r.json().get(
+            "response",
+            "Sorry, I had trouble thinking."
+        )
 
     except Exception:
         return "Sorry, I had trouble thinking. Please continue."
+
 
 # ---------- ROOT ----------
 @app.get("/")
 def root():
     return {"status": "SmartSpeak running"}
+
 
 # ---------- REPORTS ----------
 @app.get("/reports")
@@ -93,6 +99,58 @@ def get_reports():
     except Exception as e:
         return {"error": str(e)}
 
+
+# ---------- DASHBOARD ----------
+@app.get("/dashboard")
+def get_dashboard():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                COUNT(*) AS total_sessions,
+                AVG(fluency) AS avg_fluency,
+                AVG(grammar) AS avg_grammar
+            FROM reports
+        """)
+
+        row = cur.fetchone()
+
+        total_sessions = row[0] or 0
+
+        avg_fluency = (
+            round(float(row[1]), 1)
+            if row[1] is not None
+            else 0
+        )
+
+        avg_grammar = (
+            round(float(row[2]), 1)
+            if row[2] is not None
+            else 0
+        )
+
+        cur.close()
+        conn.close()
+
+        return {
+            "upcoming_call": None,
+            "total_sessions": total_sessions,
+            "fluency_score": avg_fluency,
+            "grammar_score": avg_grammar
+        }
+
+    except Exception as e:
+        return {
+            "upcoming_call": None,
+            "total_sessions": 0,
+            "fluency_score": 0,
+            "grammar_score": 0,
+            "error": str(e)
+        }
+
+
 # ---------- START CALL ----------
 @app.post("/start-call")
 def start_call(phone: str):
@@ -101,7 +159,9 @@ def start_call(phone: str):
         from_=TWILIO_PHONE,
         url=f"{BASE_URL}/voice"
     )
+
     return {"sid": call.sid}
+
 
 # ---------- VOICE ----------
 @app.post("/voice")
@@ -120,19 +180,27 @@ Tell me about your day.
 </Gather>
 </Response>
 """
-    return Response(twiml, media_type="application/xml")
+
+    return Response(
+        twiml,
+        media_type="application/xml"
+    )
+
 
 # ---------- PROCESS ----------
 @app.post("/process")
 async def process(SpeechResult: str = Form(None)):
 
     if not SpeechResult:
-        return Response(f"""
+        return Response(
+            f"""
 <Response>
 <Say>I did not hear you.</Say>
 <Redirect>{BASE_URL}/voice</Redirect>
 </Response>
-""", media_type="application/xml")
+""",
+            media_type="application/xml"
+        )
 
     reply = ask_ai(SpeechResult)
 
@@ -142,13 +210,20 @@ async def process(SpeechResult: str = Form(None)):
     try:
         conn = get_db()
         cur = conn.cursor()
+
         cur.execute(
-            "INSERT INTO reports(topic, fluency, grammar) VALUES(%s,%s,%s)",
+            """
+            INSERT INTO reports(topic, fluency, grammar)
+            VALUES(%s, %s, %s)
+            """,
             ("conversation", fluency, grammar)
         )
+
         conn.commit()
+
         cur.close()
         conn.close()
+
     except:
         pass
 
@@ -163,4 +238,8 @@ async def process(SpeechResult: str = Form(None)):
 </Gather>
 </Response>
 """
-    return Response(twiml, media_type="application/xml")
+
+    return Response(
+        twiml,
+        media_type="application/xml"
+    )
