@@ -1,6 +1,7 @@
 from fastapi import FastAPI, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from pydantic import BaseModel
 import psycopg2
 import os
 from twilio.rest import Client
@@ -25,7 +26,10 @@ TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID")
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN")
 TWILIO_PHONE = os.getenv("TWILIO_PHONE")
 
-twilio_client = Client(TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN)
+twilio_client = Client(
+    TWILIO_ACCOUNT_SID,
+    TWILIO_AUTH_TOKEN
+)
 
 # ---------- DB ----------
 def get_db():
@@ -65,7 +69,9 @@ AI:
 # ---------- ROOT ----------
 @app.get("/")
 def root():
-    return {"status": "SmartSpeak running"}
+    return {
+        "status": "SmartSpeak running"
+    }
 
 
 # ---------- REPORTS ----------
@@ -97,7 +103,9 @@ def get_reports():
         ]
 
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "error": str(e)
+        }
 
 
 # ---------- DASHBOARD ----------
@@ -107,6 +115,7 @@ def get_dashboard():
         conn = get_db()
         cur = conn.cursor()
 
+        # Report statistics
         cur.execute("""
             SELECT
                 COUNT(*) AS total_sessions,
@@ -131,11 +140,38 @@ def get_dashboard():
             else 0
         )
 
+        # Get upcoming scheduled call
+        cur.execute("""
+            SELECT
+                id,
+                name,
+                topic,
+                scheduled_time,
+                created_at
+            FROM scheduled_calls
+            WHERE scheduled_time >= CURRENT_TIMESTAMP
+            ORDER BY scheduled_time ASC
+            LIMIT 1
+        """)
+
+        upcoming_row = cur.fetchone()
+
+        upcoming_call = None
+
+        if upcoming_row:
+            upcoming_call = {
+                "id": str(upcoming_row[0]),
+                "name": upcoming_row[1],
+                "topic": upcoming_row[2],
+                "scheduled_time": str(upcoming_row[3]),
+                "created_at": str(upcoming_row[4]),
+            }
+
         cur.close()
         conn.close()
 
         return {
-            "upcoming_call": None,
+            "upcoming_call": upcoming_call,
             "total_sessions": total_sessions,
             "fluency_score": avg_fluency,
             "grammar_score": avg_grammar
@@ -151,6 +187,112 @@ def get_dashboard():
         }
 
 
+# ---------- SCHEDULE CALL ----------
+
+class ScheduleRequest(BaseModel):
+    name: str
+    topic: str
+    scheduled_time: str
+
+
+@app.post("/schedule")
+def schedule_call(data: ScheduleRequest):
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO scheduled_calls
+            (
+                name,
+                topic,
+                scheduled_time
+            )
+            VALUES
+            (%s, %s, %s)
+            RETURNING
+                id,
+                name,
+                topic,
+                scheduled_time,
+                created_at
+            """,
+            (
+                data.name,
+                data.topic,
+                data.scheduled_time,
+            )
+        )
+
+        row = cur.fetchone()
+
+        conn.commit()
+
+        cur.close()
+        conn.close()
+
+        return {
+            "success": True,
+            "message": "Call scheduled successfully",
+            "call": {
+                "id": str(row[0]),
+                "name": row[1],
+                "topic": row[2],
+                "scheduled_time": str(row[3]),
+                "created_at": str(row[4]),
+            },
+        }
+
+    except Exception as e:
+        print("Schedule error:", e)
+
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+# ---------- GET SCHEDULED CALLS ----------
+@app.get("/scheduled-calls")
+def get_scheduled_calls():
+    try:
+        conn = get_db()
+        cur = conn.cursor()
+
+        cur.execute("""
+            SELECT
+                id,
+                name,
+                topic,
+                scheduled_time,
+                created_at
+            FROM scheduled_calls
+            ORDER BY scheduled_time ASC
+        """)
+
+        rows = cur.fetchall()
+
+        cur.close()
+        conn.close()
+
+        return [
+            {
+                "id": str(row[0]),
+                "name": row[1],
+                "topic": row[2],
+                "scheduled_time": str(row[3]),
+                "created_at": str(row[4]),
+            }
+            for row in rows
+        ]
+
+    except Exception as e:
+        return {
+            "error": str(e)
+        }
+
+
 # ---------- START CALL ----------
 @app.post("/start-call")
 def start_call(phone: str):
@@ -160,12 +302,15 @@ def start_call(phone: str):
         url=f"{BASE_URL}/voice"
     )
 
-    return {"sid": call.sid}
+    return {
+        "sid": call.sid
+    }
 
 
 # ---------- VOICE ----------
 @app.post("/voice")
 async def voice():
+
     twiml = f"""
 <Response>
 <Say voice="alice">
@@ -173,11 +318,17 @@ Hello! I am your SmartSpeak AI friend.
 Tell me about your day.
 </Say>
 
-<Gather input="speech" timeout="6"
-        action="{BASE_URL}/process"
-        method="POST">
-<Say voice="alice">I am listening.</Say>
+<Gather
+    input="speech"
+    timeout="6"
+    action="{BASE_URL}/process"
+    method="POST"
+>
+<Say voice="alice">
+I am listening.
+</Say>
 </Gather>
+
 </Response>
 """
 
@@ -189,14 +340,22 @@ Tell me about your day.
 
 # ---------- PROCESS ----------
 @app.post("/process")
-async def process(SpeechResult: str = Form(None)):
+async def process(
+    SpeechResult: str = Form(None)
+):
 
     if not SpeechResult:
         return Response(
             f"""
 <Response>
-<Say>I did not hear you.</Say>
-<Redirect>{BASE_URL}/voice</Redirect>
+<Say>
+I did not hear you.
+</Say>
+
+<Redirect>
+{BASE_URL}/voice
+</Redirect>
+
 </Response>
 """,
             media_type="application/xml"
@@ -213,10 +372,20 @@ async def process(SpeechResult: str = Form(None)):
 
         cur.execute(
             """
-            INSERT INTO reports(topic, fluency, grammar)
-            VALUES(%s, %s, %s)
+            INSERT INTO reports
+            (
+                topic,
+                fluency,
+                grammar
+            )
+            VALUES
+            (%s, %s, %s)
             """,
-            ("conversation", fluency, grammar)
+            (
+                "conversation",
+                fluency,
+                grammar
+            )
         )
 
         conn.commit()
@@ -224,18 +393,27 @@ async def process(SpeechResult: str = Form(None)):
         cur.close()
         conn.close()
 
-    except:
+    except Exception:
         pass
 
     twiml = f"""
 <Response>
-<Say voice="alice">{reply}</Say>
 
-<Gather input="speech" timeout="6"
-        action="{BASE_URL}/process"
-        method="POST">
-<Say voice="alice">Go on, I am listening.</Say>
+<Say voice="alice">
+{reply}
+</Say>
+
+<Gather
+    input="speech"
+    timeout="6"
+    action="{BASE_URL}/process"
+    method="POST"
+>
+<Say voice="alice">
+Go on, I am listening.
+</Say>
 </Gather>
+
 </Response>
 """
 
