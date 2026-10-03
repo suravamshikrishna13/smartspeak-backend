@@ -4,3 +4,5 @@ psycopg2-binary
 twilio
 openai>=1.0.0
 python-multipart
+websockets>=13.0.0,<17.0
+google-genai
